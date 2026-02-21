@@ -1,0 +1,42 @@
+{
+  "name": "skills-manager-demo",
+  "version": "1.0.0",
+  "description": "MCP Skills Manager - Manage Claude Code MCP servers and Skills",
+  "main": "dist/cli.js",
+  "type": "module",
+  "bin": {
+    "skills-manager": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "babel --out-dir=dist source",
+    "dev": "babel --out-dir=dist --watch source",
+    "start": "npm run build && node dist/cli.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "mcp",
+    "claude",
+    "cli",
+    "skills"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "ink": "^6.8.0",
+    "react": "^19.2.4"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.28.6",
+    "@babel/core": "^7.29.0",
+    "@babel/node": "^7.29.0",
+    "@babel/preset-react": "^7.28.5",
+    "@babel/register": "^7.28.6"
+  },
+  "babel": {
+    "presets": [
+      "@babel/preset-react"
+    ]
+  }
+}
+
