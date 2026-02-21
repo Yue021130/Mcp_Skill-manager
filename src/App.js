@@ -342,12 +342,10 @@ export default function App() {
       {/* 底部状态栏 */}
       <Box borderStyle="single" borderColor="cyan" paddingX={2} height={3}>
         <Text color="cyan">
-          {error && `❌ ${error}`}
-          {message && `✅ ${message}`}
-          {!error && !message && (page === PAGES.MCP ? `MCP 管理 | 窗口: ${activeWindow === MCP_WINDOWS.LIST ? '列表' : activeWindow === MCP_WINDOWS.DETAILS ? '详情' : '配置/CLI'} | [Tab/←→] 切换 | [↑↓] 导航 | [Enter] 确认 | [d] 删除 | [r] 刷新 | [q] 退出` : '')}
-          {!error && !message && (page === PAGES.SKILLS ? 'Skills 管理 | [↑↓] 导航 | [Enter] 切换启用 | [r] 刷新 | [q] 退出' : '')}
-          {!error && !message && (page === PAGES.TRASH ? '回收站 | [↑↓] 导航 | [Enter] 恢复 | [r] 刷新 | [q] 退出' : '')}
-          {!error && !message && (page === PAGES.SETTINGS ? '设置 | [r] 刷新 | [q] 退出' : '')}
+          {page === PAGES.MCP && `MCP 管理 | 窗口: ${activeWindow === MCP_WINDOWS.LIST ? '列表' : activeWindow === MCP_WINDOWS.DETAILS ? '详情' : '配置/CLI'} | [Tab/←→] 切换 | [↑↓] 导航 | [Enter] 确认 | [d] 删除 | [r] 刷新 | [q] 退出`}
+          {page === PAGES.SKILLS && 'Skills 管理 | [↑↓] 导航 | [Enter] 切换启用 | [r] 刷新 | [q] 退出'}
+          {page === PAGES.TRASH && '回收站 | [↑↓] 导航 | [Enter] 恢复 | [r] 刷新 | [q] 退出'}
+          {page === PAGES.SETTINGS && '设置 | [r] 刷新 | [q] 退出'}
         </Text>
       </Box>
     </Box>
@@ -384,42 +382,62 @@ function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, ac
         </Box>
       </Box>
 
-      {/* 中间：详情 - MCP Server 格式 */}
+      {/* 中间：详情 */}
       <Box
         width={middleWidth}
-        borderStyle="round"
+        borderStyle="single"
         borderColor={activeWindow === MCP_WINDOWS.DETAILS ? 'green' : 'gray'}
         flexDirection="column"
-        paddingX={2}
-        paddingY={1}
+        paddingX={1}
+        paddingY={0}
       >
-        {serverInfo ? (
-          <Box flexDirection="column">
-            <Text bold color="cyan">{selectedItem} MCP Server</Text>
-            <Text> </Text>
-            
-            <Text color="green">Status: ✔ configured</Text>
-            <Text color="gray">Command: {serverInfo.clis[Object.keys(serverInfo.clis)[0]]?.config?.command || 'N/A'}</Text>
-            <Text color="gray">
-              Args: {JSON.stringify(serverInfo.clis[Object.keys(serverInfo.clis)[0]]?.config?.args || []).slice(0, 60)}
-            </Text>
-            <Text color="gray">
-              Config location: {Object.keys(serverInfo.clis).map(cli => {
-                if (cli === SUPPORTED_CLIS.CLAUDE) return '~/.claude.json';
-                if (cli === SUPPORTED_CLIS.GEMINI) return '~/.gemini/settings.json';
-                return '~/.config';
-              }).join(', ')}
-            </Text>
-            <Text color="gray">Type: {serverInfo.clis[Object.keys(serverInfo.clis)[0]]?.config?.type || 'stdio'}</Text>
-            <Text> </Text>
-            
-            <Text bold color="yellow">❯ /mcp</Text>
-            <Text color="gray">  1. View config</Text>
-            <Text color="gray">  2. Sync to all CLIs</Text>
-            <Text color="gray">  3. Delete</Text>
-          </Box>
-        ) : (
-          <Text color="gray">选择一个 MCP 查看详情</Text>
+        <Text bold color="cyan">详情</Text>
+        {serverInfo ? (() => {
+          const firstCli = Object.keys(serverInfo.clis)[0];
+          const config = serverInfo.clis[firstCli]?.config || {};
+          const args = config.args || [];
+          const env = config.env || {};
+          const envEntries = Object.entries(env);
+          const cliNames = Object.keys(serverInfo.clis).map(c => CLI_NAMES[c] || c);
+          return (
+            <Box flexDirection="column" marginTop={1}>
+              <Text bold color="yellow">{selectedItem}</Text>
+
+              <Text> </Text>
+              <Text color="gray">command: <Text color="white">{config.command || 'N/A'}</Text></Text>
+
+              {args.length > 0 && (
+                <Box flexDirection="column">
+                  <Text color="gray">args:</Text>
+                  {args.map((a, i) => (
+                    <Text key={i} color="white">  {a}</Text>
+                  ))}
+                </Box>
+              )}
+
+              <Text color="gray">type: <Text color="white">{config.type || 'stdio'}</Text></Text>
+
+              {envEntries.length > 0 && (
+                <Box flexDirection="column" marginTop={1}>
+                  <Text color="gray">env:</Text>
+                  {envEntries.map(([k, v]) => (
+                    <Text key={k} color="white">  {k}=<Text color="gray">{String(v).slice(0, 30)}</Text></Text>
+                  ))}
+                </Box>
+              )}
+
+              <Text> </Text>
+              <Text color="gray">已配置在:</Text>
+              {cliNames.map(n => (
+                <Text key={n} color="green">  🟢 {n}</Text>
+              ))}
+              {availableCLIs.filter(c => !serverInfo.clis[c]).map(c => (
+                <Text key={c} color="gray">  ⚪ {CLI_NAMES[c]}</Text>
+              ))}
+            </Box>
+          );
+        })() : (
+          <Text color="gray" dimColor>选择一个 MCP 查看详情</Text>
         )}
       </Box>
 
@@ -434,18 +452,28 @@ function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, ac
           paddingX={1}
         >
           <Text bold color="cyan">配置参数</Text>
-          {serverInfo && (
-            <Box flexDirection="column" marginTop={1} overflow="hidden">
-              {(() => {
-                const config = serverInfo.clis[Object.keys(serverInfo.clis)[0]]?.config || {};
-                return Object.entries(config).map(([key, value]) => (
-                  <Text key={key} color="gray">
-                    {key}: {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                  </Text>
+          {serverInfo && (() => {
+            const config = serverInfo.clis[Object.keys(serverInfo.clis)[0]]?.config || {};
+            const rows = [];
+            for (const [key, value] of Object.entries(config)) {
+              if (Array.isArray(value)) {
+                rows.push(<Text key={key} color="gray">{key}:</Text>);
+                value.forEach((v, i) => rows.push(
+                  <Text key={`${key}-${i}`} color="white">  {String(v)}</Text>
                 ));
-              })()}
-            </Box>
-          )}
+              } else if (value !== null && typeof value === 'object') {
+                rows.push(<Text key={key} color="gray">{key}:</Text>);
+                Object.entries(value).forEach(([k, v]) => rows.push(
+                  <Text key={`${key}-${k}`} color="white">  {k}: <Text color="gray">{String(v).slice(0, 25)}</Text></Text>
+                ));
+              } else {
+                rows.push(
+                  <Text key={key} color="gray">{key}: <Text color="white">{String(value)}</Text></Text>
+                );
+              }
+            }
+            return <Box flexDirection="column" marginTop={1} overflow="hidden">{rows}</Box>;
+          })()}
         </Box>
 
         {/* 下：CLI 状态（40%）*/}
@@ -470,7 +498,7 @@ function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, ac
                   </Text>
                 );
               })}
-              {activeWindow === MCP_WINDOWS.CLI && (
+              {activeWindow === MCP_WINDOWS.RIGHT && rightPanel === RIGHT_PANEL.CLI && (
                 <Box marginTop={1}>
                   <Text color="yellow" dimColor>[Enter] 切换</Text>
                 </Box>
