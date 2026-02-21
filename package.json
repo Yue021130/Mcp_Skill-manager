@@ -1,21 +1,22 @@
 {
-  "name": "skills-manager-demo",
+  "name": "mcp_skill-manager",
   "version": "1.0.0",
-  "description": "MCP Skills Manager - Manage Claude Code MCP servers and Skills",
+  "description": "MCP & Skills Manager - 统一管理多个 CLI 的 MCP 服务器和 Skills",
   "main": "dist/cli.js",
   "type": "module",
   "bin": {
-    "skills-manager": "./dist/cli.js"
+    "mcp-manager": "./dist/cli.js"
   },
   "scripts": {
-    "build": "babel --out-dir=dist source",
-    "dev": "babel --out-dir=dist --watch source",
+    "build": "babel --out-dir=dist src",
+    "dev": "babel --out-dir=dist --watch src",
     "start": "npm run build && node dist/cli.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
     "mcp",
     "claude",
+    "gemini",
     "cli",
     "skills"
   ],

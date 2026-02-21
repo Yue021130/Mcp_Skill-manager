@@ -14,8 +14,12 @@ const PAGES = {
 const MCP_WINDOWS = {
   LIST: 0,
   DETAILS: 1,
-  CONFIG: 2,
-  CLI: 3
+  RIGHT: 2  // 右侧窗口包含 Config 和 CLI
+};
+
+const RIGHT_PANEL = {
+  CONFIG: 0,
+  CLI: 1
 };
 
 const CLI_NAMES = {
@@ -30,6 +34,7 @@ export default function App() {
   const [activeWindow, setActiveWindow] = useState(MCP_WINDOWS.LIST);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [cliSelectedIndex, setCliSelectedIndex] = useState(0);
+  const [rightPanel, setRightPanel] = useState(RIGHT_PANEL.CONFIG);  // 右侧面板选择
   
   const [configManager, setConfigManager] = useState(null);
   const [managerConfig, setManagerConfig] = useState(null);
@@ -91,11 +96,14 @@ export default function App() {
       return;
     }
 
-    // Tab - 切换窗口
-    if (key.tab) {
+    // Tab 或 左右箭头 - 切换窗口
+    if (key.tab || key.leftArrow || key.rightArrow) {
       if (page === PAGES.MCP) {
-        const maxWindow = 3;
-        setActiveWindow((prev) => (prev + 1) % (maxWindow + 1));
+        if (key.leftArrow) {
+          setActiveWindow((prev) => prev === 0 ? MCP_WINDOWS.RIGHT : prev - 1);
+        } else {
+          setActiveWindow((prev) => (prev + 1) % 3);  // 0, 1, 2 循环
+        }
       }
       return;
     }
@@ -136,19 +144,38 @@ export default function App() {
       }
     }
 
-    // CLI 窗口导航
-    if (page === PAGES.MCP && activeWindow === MCP_WINDOWS.CLI) {
+    // 右侧窗口导航
+    if (page === PAGES.MCP && activeWindow === MCP_WINDOWS.RIGHT) {
       if (key.upArrow) {
-        setCliSelectedIndex(prev => Math.max(0, prev - 1));
+        if (rightPanel === RIGHT_PANEL.CLI) {
+          // CLI 列表内部导航
+          setCliSelectedIndex(prev => {
+            if (prev === 0) {
+              // 切换到 Config 面板
+              setRightPanel(RIGHT_PANEL.CONFIG);
+              return 0;
+            }
+            return prev - 1;
+          });
+        } else {
+          // Config 面板，向上不做操作
+        }
         return;
       }
       if (key.downArrow) {
-        setCliSelectedIndex(prev => Math.min(availableCLIs.length - 1, prev + 1));
+        if (rightPanel === RIGHT_PANEL.CONFIG) {
+          // 从 Config 切换到 CLI
+          setRightPanel(RIGHT_PANEL.CLI);
+          setCliSelectedIndex(0);
+        } else {
+          // CLI 列表内部导航
+          setCliSelectedIndex(prev => Math.min(availableCLIs.length - 1, prev + 1));
+        }
         return;
       }
 
-      // 回车 - 切换 CLI 状态
-      if (key.return && selectedItem) {
+      // 回车 - 在 CLI 面板时切换 CLI 状态
+      if (key.return && selectedItem && rightPanel === RIGHT_PANEL.CLI) {
         const serverInfo = mcpServers[selectedItem];
         const selectedCli = availableCLIs[cliSelectedIndex];
         
@@ -283,6 +310,7 @@ export default function App() {
             selectedIndex={selectedIndex}
             cliSelectedIndex={cliSelectedIndex}
             activeWindow={activeWindow}
+            rightPanel={rightPanel}
             availableCLIs={availableCLIs}
             terminalWidth={terminalWidth}
           />
@@ -311,13 +339,15 @@ export default function App() {
         )}
       </Box>
 
-      {/* 底部快捷键栏 */}
-      <Box borderStyle="single" borderColor="yellow" paddingX={2} height={3}>
-        <Text color="yellow">
-          {page === PAGES.MCP && '[Tab] 切换窗口 | [↑↓] 导航 | [Enter] 切换CLI | [d] 删除 | [r] 刷新 | [q] 退出'}
-          {page === PAGES.SKILLS && '[↑↓] 导航 | [Enter] 切换启用 | [r] 刷新 | [q] 退出'}
-          {page === PAGES.TRASH && '[↑↓] 导航 | [Enter] 恢复 | [r] 刷新 | [q] 退出'}
-          {page === PAGES.SETTINGS && '[r] 刷新 | [q] 退出'}
+      {/* 底部状态栏 */}
+      <Box borderStyle="single" borderColor="cyan" paddingX={2} height={3}>
+        <Text color="cyan">
+          {error && `❌ ${error}`}
+          {message && `✅ ${message}`}
+          {!error && !message && (page === PAGES.MCP ? `MCP 管理 | 窗口: ${activeWindow === MCP_WINDOWS.LIST ? '列表' : activeWindow === MCP_WINDOWS.DETAILS ? '详情' : '配置/CLI'} | [Tab/←→] 切换 | [↑↓] 导航 | [Enter] 确认 | [d] 删除 | [r] 刷新 | [q] 退出` : '')}
+          {!error && !message && (page === PAGES.SKILLS ? 'Skills 管理 | [↑↓] 导航 | [Enter] 切换启用 | [r] 刷新 | [q] 退出' : '')}
+          {!error && !message && (page === PAGES.TRASH ? '回收站 | [↑↓] 导航 | [Enter] 恢复 | [r] 刷新 | [q] 退出' : '')}
+          {!error && !message && (page === PAGES.SETTINGS ? '设置 | [r] 刷新 | [q] 退出' : '')}
         </Text>
       </Box>
     </Box>
@@ -325,7 +355,7 @@ export default function App() {
 }
 
 // MCP 页面 - 三栏布局
-function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, activeWindow, availableCLIs, terminalWidth }) {
+function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, activeWindow, rightPanel, availableCLIs, terminalWidth }) {
   const mcpList = Object.keys(mcpServers).sort();
   const serverInfo = selectedItem ? mcpServers[selectedItem] : null;
   
@@ -354,35 +384,42 @@ function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, ac
         </Box>
       </Box>
 
-      {/* 中间：详情 */}
+      {/* 中间：详情 - MCP Server 格式 */}
       <Box
         width={middleWidth}
-        borderStyle="single"
+        borderStyle="round"
         borderColor={activeWindow === MCP_WINDOWS.DETAILS ? 'green' : 'gray'}
         flexDirection="column"
-        paddingX={1}
+        paddingX={2}
+        paddingY={1}
       >
-        <Text bold color="cyan">详情</Text>
-        {serverInfo && (
-          <Box flexDirection="column" marginTop={1}>
-            <Text bold color="yellow">名称</Text>
-            <Text color="white">{selectedItem}</Text>
+        {serverInfo ? (
+          <Box flexDirection="column">
+            <Text bold color="cyan">{selectedItem} MCP Server</Text>
+            <Text> </Text>
             
-            <Box marginTop={1}>
-              <Text bold color="yellow">类型</Text>
-            </Box>
-            <Text color="gray">{serverInfo.clis[Object.keys(serverInfo.clis)[0]]?.config?.type || 'stdio'}</Text>
+            <Text color="green">Status: ✔ configured</Text>
+            <Text color="gray">Command: {serverInfo.clis[Object.keys(serverInfo.clis)[0]]?.config?.command || 'N/A'}</Text>
+            <Text color="gray">
+              Args: {JSON.stringify(serverInfo.clis[Object.keys(serverInfo.clis)[0]]?.config?.args || []).slice(0, 60)}
+            </Text>
+            <Text color="gray">
+              Config location: {Object.keys(serverInfo.clis).map(cli => {
+                if (cli === SUPPORTED_CLIS.CLAUDE) return '~/.claude.json';
+                if (cli === SUPPORTED_CLIS.GEMINI) return '~/.gemini/settings.json';
+                return '~/.config';
+              }).join(', ')}
+            </Text>
+            <Text color="gray">Type: {serverInfo.clis[Object.keys(serverInfo.clis)[0]]?.config?.type || 'stdio'}</Text>
+            <Text> </Text>
             
-            <Box marginTop={1}>
-              <Text bold color="yellow">命令</Text>
-            </Box>
-            <Text color="gray">{serverInfo.clis[Object.keys(serverInfo.clis)[0]]?.config?.command || 'N/A'}</Text>
-            
-            <Box marginTop={1}>
-              <Text bold color="yellow">描述</Text>
-            </Box>
-            <Text color="gray">MCP 服务器</Text>
+            <Text bold color="yellow">❯ /mcp</Text>
+            <Text color="gray">  1. View config</Text>
+            <Text color="gray">  2. Sync to all CLIs</Text>
+            <Text color="gray">  3. Delete</Text>
           </Box>
+        ) : (
+          <Text color="gray">选择一个 MCP 查看详情</Text>
         )}
       </Box>
 
@@ -392,16 +429,21 @@ function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, ac
         <Box
           flexGrow={3}
           borderStyle="single"
-          borderColor={activeWindow === MCP_WINDOWS.CONFIG ? 'green' : 'gray'}
+          borderColor={activeWindow === MCP_WINDOWS.RIGHT && rightPanel === RIGHT_PANEL.CONFIG ? 'green' : 'gray'}
           flexDirection="column"
           paddingX={1}
         >
           <Text bold color="cyan">配置参数</Text>
           {serverInfo && (
-            <Box flexDirection="column" marginTop={1}>
-              <Text color="gray" wrap="wrap">
-                args: {JSON.stringify(serverInfo.clis[Object.keys(serverInfo.clis)[0]]?.config?.args || [])}
-              </Text>
+            <Box flexDirection="column" marginTop={1} overflow="hidden">
+              {(() => {
+                const config = serverInfo.clis[Object.keys(serverInfo.clis)[0]]?.config || {};
+                return Object.entries(config).map(([key, value]) => (
+                  <Text key={key} color="gray">
+                    {key}: {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                  </Text>
+                ));
+              })()}
             </Box>
           )}
         </Box>
@@ -410,7 +452,7 @@ function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, ac
         <Box
           flexGrow={2}
           borderStyle="single"
-          borderColor={activeWindow === MCP_WINDOWS.CLI ? 'green' : 'gray'}
+          borderColor={activeWindow === MCP_WINDOWS.RIGHT && rightPanel === RIGHT_PANEL.CLI ? 'green' : 'gray'}
           flexDirection="column"
           paddingX={1}
         >
@@ -419,7 +461,7 @@ function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, ac
             <Box flexDirection="column" marginTop={1}>
               {availableCLIs.map((cli, index) => {
                 const hasCli = serverInfo.clis[cli];
-                const isSelected = activeWindow === MCP_WINDOWS.CLI && index === cliSelectedIndex;
+                const isSelected = activeWindow === MCP_WINDOWS.RIGHT && rightPanel === RIGHT_PANEL.CLI && index === cliSelectedIndex;
                 
                 return (
                   <Text key={cli}>
