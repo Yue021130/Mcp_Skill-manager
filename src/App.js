@@ -331,9 +331,9 @@ function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, de
   const mcpList = Object.keys(mcpServers).sort();
   const serverInfo = selectedItem ? mcpServers[selectedItem] : null;
 
-  // Column widths: 25% | 42% | 33%
-  const leftWidth = Math.floor(terminalWidth * 0.25);
-  const middleWidth = Math.floor(terminalWidth * 0.42);
+  // Column widths: 22% | 50% | 28%
+  const leftWidth = Math.floor(terminalWidth * 0.22);
+  const middleWidth = Math.floor(terminalWidth * 0.50);
   const rightWidth = terminalWidth - leftWidth - middleWidth;
 
   // Virtual scroll: subtract top(3) + msgbar(1) + bottom(3) + border(2) + title(1) + margin(1) = 11
@@ -344,13 +344,12 @@ function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, de
   ));
   const visibleList = mcpList.slice(scrollOffset, scrollOffset + listVisible);
 
-  // Build details content
+  // Build details content — show ALL config key-value pairs
   const renderDetails = () => {
     if (!serverInfo) return <Text color="gray" dimColor>Select an MCP to view details</Text>;
 
     const firstCli = Object.keys(serverInfo.clis)[0];
     const config = serverInfo.clis[firstCli]?.config || {};
-    const type = config.type || 'stdio';
     const isDisabled = !!config.disabled;
     const configPaths = Object.keys(serverInfo.clis)
       .map(cli =>
@@ -358,6 +357,8 @@ function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, de
         cli === SUPPORTED_CLIS.GEMINI ? '~/.gemini/settings.json' : cli
       )
       .join(', ');
+
+    const configEntries = Object.entries(config).filter(([k]) => k !== 'disabled');
 
     return (
       <Box flexDirection="column">
@@ -369,17 +370,36 @@ function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, de
             {isDisabled ? '\u2716 disabled' : '\u2714 configured'}
           </Text>
         </Text>
-        {type === 'stdio' && config.command && (
-          <Text>{'Command: '}<Text color="white">{config.command}</Text></Text>
-        )}
-        {type === 'stdio' && config.args && config.args.length > 0 && (
-          <Text>{'Args: '}<Text color="white">{config.args.join(' ')}</Text></Text>
-        )}
-        {(type === 'sse' || type === 'http') && config.url && (
-          <Text>{'URL: '}<Text color="white">{config.url}</Text></Text>
-        )}
-        <Text>{'Config location: '}<Text color="white">{configPaths}</Text></Text>
-        <Text>{'Type: '}<Text color="white">{type}</Text></Text>
+        <Text>{'Config: '}<Text color="white">{configPaths}</Text></Text>
+        <Text> </Text>
+        {configEntries.map(([key, value]) => {
+          if (Array.isArray(value)) {
+            return (
+              <Box key={key} flexDirection="column">
+                <Text color="gray">{key}:</Text>
+                {value.map((item, i) => (
+                  <Text key={i} color="white" wrap="truncate">{'  '}{String(item)}</Text>
+                ))}
+              </Box>
+            );
+          }
+          if (typeof value === 'object' && value !== null) {
+            return (
+              <Box key={key} flexDirection="column">
+                <Text color="gray">{key}:</Text>
+                {Object.entries(value).map(([k, v]) => (
+                  <Text key={k} color="white" wrap="truncate">{'  '}{k}: <Text color="gray">{maskValue(k, v)}</Text></Text>
+                ))}
+              </Box>
+            );
+          }
+          return (
+            <Text key={key} wrap="truncate">
+              <Text color="gray">{key}: </Text>
+              <Text color="white">{String(value)}</Text>
+            </Text>
+          );
+        })}
         <Text> </Text>
         {detailMenu.map((item, i) => {
           const active = activeWindow === MCP_WINDOWS.DETAILS && i === detailMenuIndex;
@@ -389,41 +409,6 @@ function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, de
             </Text>
           );
         })}
-      </Box>
-    );
-  };
-
-  // Build params content (env + headers)
-  const renderParams = () => {
-    if (!serverInfo) return null;
-    const firstCli = Object.keys(serverInfo.clis)[0];
-    const config = serverInfo.clis[firstCli]?.config || {};
-    const env = config.env || {};
-    const headers = config.headers || {};
-    const envEntries = Object.entries(env);
-    const headerEntries = Object.entries(headers);
-    const hasParams = envEntries.length > 0 || headerEntries.length > 0;
-
-    if (!hasParams) return <Text color="gray" dimColor>(no params)</Text>;
-
-    return (
-      <Box flexDirection="column">
-        {envEntries.length > 0 && (
-          <Box flexDirection="column">
-            <Text color="gray">env:</Text>
-            {envEntries.map(([k, v]) => (
-              <Text key={k} color="white">  {k}=<Text color="gray">{maskValue(k, v)}</Text></Text>
-            ))}
-          </Box>
-        )}
-        {headerEntries.length > 0 && (
-          <Box flexDirection="column" marginTop={envEntries.length > 0 ? 1 : 0}>
-            <Text color="gray">headers:</Text>
-            {headerEntries.map(([k, v]) => (
-              <Text key={k} color="white">  {k}: <Text color="gray">{maskValue(k, v)}</Text></Text>
-            ))}
-          </Box>
-        )}
       </Box>
     );
   };
@@ -441,19 +426,19 @@ function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, de
         <Text bold color="cyan">MCP ({mcpList.length})</Text>
         <Box flexDirection="column" marginTop={1}>
           {scrollOffset > 0 && (
-            <Text color="gray" dimColor>  \u2191 {scrollOffset} more</Text>
+            <Text color="gray" dimColor>  {'\u2191'} {scrollOffset} more</Text>
           )}
           {visibleList.map((name, i) => {
             const realIdx = scrollOffset + i;
             const active = realIdx === selectedIndex;
             return (
-              <Text key={name} color={active ? 'cyan' : 'white'}>
+              <Text key={name} color={active ? 'cyan' : 'white'} wrap="truncate">
                 {active ? '\u25ba' : ' '} {name}
               </Text>
             );
           })}
           {scrollOffset + listVisible < mcpList.length && (
-            <Text color="gray" dimColor>  \u2193 {mcpList.length - scrollOffset - listVisible} more</Text>
+            <Text color="gray" dimColor>  {'\u2193'} {mcpList.length - scrollOffset - listVisible} more</Text>
           )}
         </Box>
       </Box>
@@ -472,52 +457,35 @@ function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, de
         </Box>
       </Box>
 
-      {/* Right: params (top) + CLI assignment (bottom) */}
-      <Box width={rightWidth} flexDirection="column">
-        {/* Top: env vars & headers */}
-        <Box
-          flexGrow={3}
-          borderStyle="single"
-          borderColor={activeWindow === MCP_WINDOWS.PARAMS ? 'green' : 'gray'}
-          flexDirection="column"
-          paddingX={1}
-        >
-          <Text bold color="cyan">Params</Text>
+      {/* Right: CLI assignment */}
+      <Box
+        width={rightWidth}
+        borderStyle="single"
+        borderColor={activeWindow === MCP_WINDOWS.PARAMS ? 'green' : 'gray'}
+        flexDirection="column"
+        paddingX={1}
+      >
+        <Text bold color="cyan">CLI</Text>
+        {serverInfo ? (
           <Box flexDirection="column" marginTop={1}>
-            {renderParams()}
+            {availableCLIs.map((cli, index) => {
+              const hasCli = !!serverInfo.clis[cli];
+              const isSelected = activeWindow === MCP_WINDOWS.PARAMS && index === cliSelectedIndex;
+              return (
+                <Box key={cli} flexDirection="column">
+                  <Text color={isSelected ? 'cyan' : 'white'}>
+                    {isSelected ? '\u25ba' : ' '} {hasCli ? '\ud83d\udfe2' : '\u26aa'} {CLI_NAMES[cli]}
+                  </Text>
+                  {isSelected && (
+                    <Text color="yellow" dimColor>  [Enter] {hasCli ? 'remove' : 'add'}</Text>
+                  )}
+                </Box>
+              );
+            })}
           </Box>
-        </Box>
-
-        {/* Bottom: CLI assignment */}
-        <Box
-          flexGrow={2}
-          borderStyle="single"
-          borderColor={activeWindow === MCP_WINDOWS.PARAMS ? 'green' : 'gray'}
-          flexDirection="column"
-          paddingX={1}
-        >
-          <Text bold color="cyan">CLI</Text>
-          {serverInfo ? (
-            <Box flexDirection="column" marginTop={1}>
-              {availableCLIs.map((cli, index) => {
-                const hasCli = !!serverInfo.clis[cli];
-                const isSelected = activeWindow === MCP_WINDOWS.PARAMS && index === cliSelectedIndex;
-                return (
-                  <Box key={cli} flexDirection="column">
-                    <Text color={isSelected ? 'cyan' : 'white'}>
-                      {isSelected ? '\u25ba' : ' '} {hasCli ? '\ud83d\udfe2' : '\u26aa'} {CLI_NAMES[cli]}
-                    </Text>
-                    {isSelected && (
-                      <Text color="yellow" dimColor>  [Enter] {hasCli ? 'remove' : 'add'}</Text>
-                    )}
-                  </Box>
-                );
-              })}
-            </Box>
-          ) : (
-            <Text color="gray" dimColor marginTop={1}>select MCP</Text>
-          )}
-        </Box>
+        ) : (
+          <Text color="gray" dimColor marginTop={1}>select MCP</Text>
+        )}
       </Box>
     </>
   );
@@ -540,19 +508,19 @@ function SkillsPage({ skills, selectedItem, selectedIndex, terminalWidth, termin
       <Box width={leftWidth} borderStyle="single" borderColor="green" flexDirection="column" paddingX={1}>
         <Text bold color="cyan">Skills ({skillsList.length})</Text>
         <Box flexDirection="column" marginTop={1}>
-          {scrollOffset > 0 && <Text color="gray" dimColor>  \u2191 {scrollOffset} more</Text>}
+          {scrollOffset > 0 && <Text color="gray" dimColor>  {'\u2191'} {scrollOffset} more</Text>}
           {visibleList.map((key, i) => {
             const realIdx = scrollOffset + i;
             const s = skills[key];
             const active = realIdx === selectedIndex;
             return (
-              <Text key={key} color={active ? 'cyan' : 'white'}>
+              <Text key={key} color={active ? 'cyan' : 'white'} wrap="truncate">
                 {active ? '\u25ba' : ' '} {s.disabled ? '\u26aa' : '\ud83d\udfe2'} {s.name}
               </Text>
             );
           })}
           {scrollOffset + listVisible < skillsList.length && (
-            <Text color="gray" dimColor>  \u2193 {skillsList.length - scrollOffset - listVisible} more</Text>
+            <Text color="gray" dimColor>  {'\u2193'} {skillsList.length - scrollOffset - listVisible} more</Text>
           )}
         </Box>
       </Box>
@@ -597,18 +565,18 @@ function TrashPage({ trash, selectedItem, selectedIndex, terminalWidth, terminal
       <Box width={leftWidth} borderStyle="single" borderColor="green" flexDirection="column" paddingX={1}>
         <Text bold color="cyan">Trash ({trashList.length})</Text>
         <Box flexDirection="column" marginTop={1}>
-          {scrollOffset > 0 && <Text color="gray" dimColor>  \u2191 {scrollOffset} more</Text>}
+          {scrollOffset > 0 && <Text color="gray" dimColor>  {'\u2191'} {scrollOffset} more</Text>}
           {visibleList.map((name, i) => {
             const realIdx = scrollOffset + i;
             const active = realIdx === selectedIndex;
             return (
-              <Text key={name} color={active ? 'cyan' : 'white'}>
+              <Text key={name} color={active ? 'cyan' : 'white'} wrap="truncate">
                 {active ? '\u25ba' : ' '} {name}
               </Text>
             );
           })}
           {scrollOffset + listVisible < trashList.length && (
-            <Text color="gray" dimColor>  \u2193 {trashList.length - scrollOffset - listVisible} more</Text>
+            <Text color="gray" dimColor>  {'\u2193'} {trashList.length - scrollOffset - listVisible} more</Text>
           )}
         </Box>
       </Box>
