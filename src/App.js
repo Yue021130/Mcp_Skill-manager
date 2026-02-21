@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput, useApp, useStdout } from 'ink';
-import chalk from 'chalk';
 import { ConfigManager, SUPPORTED_CLIS } from './ConfigManager.js';
 import { ManagerConfig } from './ManagerConfig.js';
 
@@ -14,12 +13,7 @@ const PAGES = {
 const MCP_WINDOWS = {
   LIST: 0,
   DETAILS: 1,
-  RIGHT: 2  // 右侧窗口包含 Config 和 CLI
-};
-
-const RIGHT_PANEL = {
-  CONFIG: 0,
-  CLI: 1
+  CLI: 2
 };
 
 const CLI_NAMES = {
@@ -34,7 +28,7 @@ export default function App() {
   const [activeWindow, setActiveWindow] = useState(MCP_WINDOWS.LIST);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [cliSelectedIndex, setCliSelectedIndex] = useState(0);
-  const [rightPanel, setRightPanel] = useState(RIGHT_PANEL.CONFIG);  // 右侧面板选择
+  const [detailMenuIndex, setDetailMenuIndex] = useState(0);
   
   const [configManager, setConfigManager] = useState(null);
   const [managerConfig, setManagerConfig] = useState(null);
@@ -73,133 +67,118 @@ export default function App() {
 
   const getCurrentList = () => {
     switch (page) {
-      case PAGES.MCP:
-        return Object.keys(mcpServers).sort();
-      case PAGES.SKILLS:
-        return Object.keys(skills).sort();
-      case PAGES.TRASH:
-        return Object.keys(trash).sort();
-      default:
-        return [];
+      case PAGES.MCP: return Object.keys(mcpServers).sort();
+      case PAGES.SKILLS: return Object.keys(skills).sort();
+      case PAGES.TRASH: return Object.keys(trash).sort();
+      default: return [];
     }
   };
 
   const currentList = getCurrentList();
   const selectedItem = currentList[selectedIndex];
 
+  // Build detail action menu for selected MCP
+  const getDetailMenu = (name) => {
+    if (!name || !mcpServers[name]) return [];
+    const serverInfo = mcpServers[name];
+    const firstCli = Object.keys(serverInfo.clis)[0];
+    const isDisabled = serverInfo.clis[firstCli]?.config?.disabled;
+    const items = [];
+    if (availableCLIs.length > 1) items.push({ label: 'Sync to all CLIs', action: 'sync' });
+    items.push({ label: 'Delete (move to trash)', action: 'delete' });
+    items.push({ label: isDisabled ? 'Enable' : 'Disable', action: 'toggle' });
+    return items;
+  };
+
+  const detailMenu = getDetailMenu(selectedItem);
+
   useInput((input, key) => {
     if (message) setMessage(null);
     if (error) setError(null);
 
-    if (input === 'q') {
-      exit();
-      return;
-    }
+    if (input === 'q') { exit(); return; }
 
-    // Tab 或 左右箭头 - 切换窗口
+    // Tab / ←→ - switch window (MCP page)
     if (key.tab || key.leftArrow || key.rightArrow) {
       if (page === PAGES.MCP) {
         if (key.leftArrow) {
-          setActiveWindow((prev) => prev === 0 ? MCP_WINDOWS.RIGHT : prev - 1);
+          setActiveWindow(prev => prev === 0 ? MCP_WINDOWS.CLI : prev - 1);
         } else {
-          setActiveWindow((prev) => (prev + 1) % 3);  // 0, 1, 2 循环
+          setActiveWindow(prev => (prev + 1) % 3);
         }
       }
       return;
     }
 
-    // 1-4 切换页面
-    if (input === '1') {
-      setPage(PAGES.MCP);
-      setActiveWindow(MCP_WINDOWS.LIST);
-      setSelectedIndex(0);
-      return;
-    }
-    if (input === '2') {
-      setPage(PAGES.SKILLS);
-      setActiveWindow(0);
-      setSelectedIndex(0);
-      return;
-    }
-    if (input === '3') {
-      setPage(PAGES.TRASH);
-      setActiveWindow(0);
-      setSelectedIndex(0);
-      return;
-    }
-    if (input === '4') {
-      setPage(PAGES.SETTINGS);
-      return;
-    }
+    // Page switch
+    if (input === '1') { setPage(PAGES.MCP); setActiveWindow(MCP_WINDOWS.LIST); setSelectedIndex(0); return; }
+    if (input === '2') { setPage(PAGES.SKILLS); setActiveWindow(0); setSelectedIndex(0); return; }
+    if (input === '3') { setPage(PAGES.TRASH); setActiveWindow(0); setSelectedIndex(0); return; }
+    if (input === '4') { setPage(PAGES.SETTINGS); return; }
 
-    // 列表导航
+    // List navigation
     if (activeWindow === MCP_WINDOWS.LIST || (page !== PAGES.MCP && activeWindow === 0)) {
-      if (key.upArrow) {
-        setSelectedIndex(prev => Math.max(0, prev - 1));
-        return;
-      }
-      if (key.downArrow) {
-        setSelectedIndex(prev => Math.min(currentList.length - 1, prev + 1));
+      if (key.upArrow) { setSelectedIndex(prev => Math.max(0, prev - 1)); return; }
+      if (key.downArrow) { setSelectedIndex(prev => Math.min(currentList.length - 1, prev + 1)); return; }
+    }
+
+    // Details window - menu navigation + execute
+    if (page === PAGES.MCP && activeWindow === MCP_WINDOWS.DETAILS) {
+      if (key.upArrow) { setDetailMenuIndex(prev => Math.max(0, prev - 1)); return; }
+      if (key.downArrow) { setDetailMenuIndex(prev => Math.min(detailMenu.length - 1, prev + 1)); return; }
+      if (key.return && selectedItem) {
+        const action = detailMenu[detailMenuIndex]?.action;
+        try {
+          if (action === 'sync') {
+            configManager.syncMcpServerToAll(selectedItem);
+            refreshData();
+            setMessage(`已同步 ${selectedItem} 到所有 CLI`);
+          } else if (action === 'delete') {
+            const serverInfo = mcpServers[selectedItem];
+            const fromCLIs = Object.keys(serverInfo.clis);
+            const config = serverInfo.clis[fromCLIs[0]].config;
+            configManager.deleteMcpServer(selectedItem);
+            managerConfig.moveToTrash(selectedItem, config, fromCLIs);
+            refreshData();
+            setSelectedIndex(prev => Math.max(0, prev - 1));
+            setDetailMenuIndex(0);
+            setMessage(`已将 ${selectedItem} 移入回收站`);
+          } else if (action === 'toggle') {
+            const serverInfo = mcpServers[selectedItem];
+            for (const cli of Object.keys(serverInfo.clis)) {
+              configManager.toggleMcpServer(selectedItem, cli);
+            }
+            refreshData();
+            setMessage(`已切换 ${selectedItem} 状态`);
+          }
+        } catch (err) {
+          setError(err.message);
+        }
         return;
       }
     }
 
-    // 右侧窗口导航
-    if (page === PAGES.MCP && activeWindow === MCP_WINDOWS.RIGHT) {
-      if (key.upArrow) {
-        if (rightPanel === RIGHT_PANEL.CLI) {
-          // CLI 列表内部导航
-          setCliSelectedIndex(prev => {
-            if (prev === 0) {
-              // 切换到 Config 面板
-              setRightPanel(RIGHT_PANEL.CONFIG);
-              return 0;
-            }
-            return prev - 1;
-          });
-        } else {
-          // Config 面板，向上不做操作
-        }
-        return;
-      }
-      if (key.downArrow) {
-        if (rightPanel === RIGHT_PANEL.CONFIG) {
-          // 从 Config 切换到 CLI
-          setRightPanel(RIGHT_PANEL.CLI);
-          setCliSelectedIndex(0);
-        } else {
-          // CLI 列表内部导航
-          setCliSelectedIndex(prev => Math.min(availableCLIs.length - 1, prev + 1));
-        }
-        return;
-      }
-
-      // 回车 - 在 CLI 面板时切换 CLI 状态
-      if (key.return && selectedItem && rightPanel === RIGHT_PANEL.CLI) {
+    // CLI window - toggle which CLIs have this MCP
+    if (page === PAGES.MCP && activeWindow === MCP_WINDOWS.CLI) {
+      if (key.upArrow) { setCliSelectedIndex(prev => Math.max(0, prev - 1)); return; }
+      if (key.downArrow) { setCliSelectedIndex(prev => Math.min(availableCLIs.length - 1, prev + 1)); return; }
+      if (key.return && selectedItem) {
         const serverInfo = mcpServers[selectedItem];
         const selectedCli = availableCLIs[cliSelectedIndex];
-        
         try {
-          const hasThisCli = serverInfo.clis[selectedCli];
-          
-          if (hasThisCli) {
-            // 取消这个 CLI
-            const remainingClis = Object.keys(serverInfo.clis).filter(c => c !== selectedCli);
-            
-            if (remainingClis.length === 0) {
-              setError(`警告: 这是最后一个 CLI，取消后 ${selectedItem} 将移入回收站`);
+          if (serverInfo.clis[selectedCli]) {
+            const remaining = Object.keys(serverInfo.clis).filter(c => c !== selectedCli);
+            if (remaining.length === 0) {
+              setError(`取消后将无CLI，请用 Delete 删除`);
               return;
             }
-            
             configManager.deleteMcpServer(selectedItem, selectedCli);
             setMessage(`已从 ${CLI_NAMES[selectedCli]} 移除 ${selectedItem}`);
           } else {
-            // 添加到这个 CLI
             const sourceCli = Object.keys(serverInfo.clis)[0];
             configManager.syncMcpServerTo(selectedItem, sourceCli, selectedCli);
             setMessage(`已添加 ${selectedItem} 到 ${CLI_NAMES[selectedCli]}`);
           }
-          
           refreshData();
         } catch (err) {
           setError(err.message);
@@ -208,16 +187,14 @@ export default function App() {
       }
     }
 
-    // MCP 删除
+    // 'd' shortcut - delete from list
     if (page === PAGES.MCP && input === 'd' && activeWindow === MCP_WINDOWS.LIST && selectedItem) {
       try {
         const serverInfo = mcpServers[selectedItem];
         const fromCLIs = Object.keys(serverInfo.clis);
         const config = serverInfo.clis[fromCLIs[0]].config;
-        
         configManager.deleteMcpServer(selectedItem);
         managerConfig.moveToTrash(selectedItem, config, fromCLIs);
-        
         refreshData();
         setSelectedIndex(prev => Math.max(0, prev - 1));
         setMessage(`已将 ${selectedItem} 移入回收站`);
@@ -227,23 +204,18 @@ export default function App() {
       return;
     }
 
-    // 回收站恢复
+    // Trash restore
     if (page === PAGES.TRASH && selectedItem && key.return) {
       try {
         const trashItem = trash[selectedItem];
-        
         for (const cli of trashItem.fromCLIs) {
           if (availableCLIs.includes(cli)) {
-            const firstCli = trashItem.fromCLIs[0];
-            configManager.managers[cli] = configManager.managers[cli] || { config: { mcpServers: {} } };
-            if (!configManager.managers[cli].config.mcpServers) {
-              configManager.managers[cli].config.mcpServers = {};
-            }
+            if (!configManager.managers[cli]) configManager.managers[cli] = { config: { mcpServers: {} } };
+            if (!configManager.managers[cli].config.mcpServers) configManager.managers[cli].config.mcpServers = {};
             configManager.managers[cli].config.mcpServers[selectedItem] = trashItem.config;
             configManager.saveConfig(cli);
           }
         }
-        
         managerConfig.restoreFromTrash(selectedItem);
         refreshData();
         setSelectedIndex(prev => Math.max(0, prev - 1));
@@ -254,7 +226,7 @@ export default function App() {
       return;
     }
 
-    // Skills 切换
+    // Skills toggle
     if (page === PAGES.SKILLS && selectedItem && key.return) {
       try {
         configManager.toggleSkill(selectedItem);
@@ -267,12 +239,7 @@ export default function App() {
       return;
     }
 
-    // 刷新
-    if (input === 'r') {
-      refreshData();
-      setMessage('已刷新');
-      return;
-    }
+    if (input === 'r') { refreshData(); setMessage('已刷新'); return; }
   });
 
   const terminalWidth = stdout?.columns || 120;
@@ -309,31 +276,32 @@ export default function App() {
             selectedItem={selectedItem}
             selectedIndex={selectedIndex}
             cliSelectedIndex={cliSelectedIndex}
+            detailMenuIndex={detailMenuIndex}
+            detailMenu={detailMenu}
             activeWindow={activeWindow}
-            rightPanel={rightPanel}
             availableCLIs={availableCLIs}
             terminalWidth={terminalWidth}
+            terminalHeight={terminalHeight}
           />
         )}
-
         {page === PAGES.SKILLS && (
           <SkillsPage
             skills={skills}
             selectedItem={selectedItem}
             selectedIndex={selectedIndex}
             terminalWidth={terminalWidth}
+            terminalHeight={terminalHeight}
           />
         )}
-
         {page === PAGES.TRASH && (
           <TrashPage
             trash={trash}
             selectedItem={selectedItem}
             selectedIndex={selectedIndex}
             terminalWidth={terminalWidth}
+            terminalHeight={terminalHeight}
           />
         )}
-
         {page === PAGES.SETTINGS && (
           <SettingsPage availableCLIs={availableCLIs} terminalWidth={terminalWidth} />
         )}
@@ -342,8 +310,8 @@ export default function App() {
       {/* 底部状态栏 */}
       <Box borderStyle="single" borderColor="cyan" paddingX={2} height={3}>
         <Text color="cyan">
-          {page === PAGES.MCP && `MCP 管理 | 窗口: ${activeWindow === MCP_WINDOWS.LIST ? '列表' : activeWindow === MCP_WINDOWS.DETAILS ? '详情' : '配置/CLI'} | [Tab/←→] 切换 | [↑↓] 导航 | [Enter] 确认 | [d] 删除 | [r] 刷新 | [q] 退出`}
-          {page === PAGES.SKILLS && 'Skills 管理 | [↑↓] 导航 | [Enter] 切换启用 | [r] 刷新 | [q] 退出'}
+          {page === PAGES.MCP && `MCP | 窗口: ${activeWindow === MCP_WINDOWS.LIST ? '列表' : activeWindow === MCP_WINDOWS.DETAILS ? '详情' : 'CLI分配'} | [Tab/←→] 切换 | [↑↓] 导航 | [Enter] 确认 | [d] 删除 | [r] 刷新 | [q] 退出`}
+          {page === PAGES.SKILLS && 'Skills | [↑↓] 导航 | [Enter] 切换启用 | [r] 刷新 | [q] 退出'}
           {page === PAGES.TRASH && '回收站 | [↑↓] 导航 | [Enter] 恢复 | [r] 刷新 | [q] 退出'}
           {page === PAGES.SETTINGS && '设置 | [r] 刷新 | [q] 退出'}
         </Text>
@@ -353,18 +321,73 @@ export default function App() {
 }
 
 // MCP 页面 - 三栏布局
-function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, activeWindow, rightPanel, availableCLIs, terminalWidth }) {
+function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, detailMenuIndex, detailMenu, activeWindow, availableCLIs, terminalWidth, terminalHeight }) {
   const mcpList = Object.keys(mcpServers).sort();
   const serverInfo = selectedItem ? mcpServers[selectedItem] : null;
-  
-  // 左侧 35%，中间 35%，右侧 30%
-  const leftWidth = Math.floor(terminalWidth * 0.35);
-  const middleWidth = Math.floor(terminalWidth * 0.35);
+
+  // 列宽: 26% | 44% | 30%
+  const leftWidth = Math.floor(terminalWidth * 0.26);
+  const middleWidth = Math.floor(terminalWidth * 0.44);
   const rightWidth = terminalWidth - leftWidth - middleWidth;
-  
+
+  // 虚拟滚动：header(3)+footer(3)+border(2)+title(1)+margin(1) ≈ 12 行开销
+  const listVisible = Math.max(3, terminalHeight - 12);
+  const scrollOffset = Math.max(0, Math.min(
+    selectedIndex - Math.floor(listVisible / 2),
+    Math.max(0, mcpList.length - listVisible)
+  ));
+  const visibleList = mcpList.slice(scrollOffset, scrollOffset + listVisible);
+
+  // 中间面板：/mcp 风格
+  const renderDetails = () => {
+    if (!serverInfo) {
+      return <Text color="gray" dimColor>← 选择一个 MCP</Text>;
+    }
+    const firstCli = Object.keys(serverInfo.clis)[0];
+    const config = serverInfo.clis[firstCli]?.config || {};
+    const type = config.type || 'stdio';
+    const isDisabled = !!config.disabled;
+    const configPaths = Object.keys(serverInfo.clis).map(cli =>
+      cli === SUPPORTED_CLIS.CLAUDE ? '~/.claude.json' :
+      cli === SUPPORTED_CLIS.GEMINI ? '~/.gemini/settings.json' : '~/.config'
+    ).join(', ');
+    const envCount = config.env ? Object.keys(config.env).length : 0;
+
+    return (
+      <Box flexDirection="column">
+        <Text bold color="white">{selectedItem} MCP Server</Text>
+        <Text> </Text>
+        <Text>{'Status: '}<Text color={isDisabled ? 'red' : 'green'}>{isDisabled ? '✖ disabled' : '✔ configured'}</Text></Text>
+        {type === 'stdio' && config.command && (
+          <Text>{'Command: '}<Text color="white">{config.command}</Text></Text>
+        )}
+        {type === 'stdio' && config.args?.length > 0 && (
+          <Text>{'Args: '}<Text color="white">{config.args.join(' ')}</Text></Text>
+        )}
+        {(type === 'sse' || type === 'http') && config.url && (
+          <Text>{'URL: '}<Text color="white">{config.url}</Text></Text>
+        )}
+        <Text>{'Config location: '}<Text color="white">{configPaths}</Text></Text>
+        <Text>{'Type: '}<Text color="white">{type}</Text></Text>
+        {envCount > 0 && (
+          <Text>{'Env vars: '}<Text color="white">{envCount} set</Text></Text>
+        )}
+        <Text> </Text>
+        {detailMenu.map((item, i) => {
+          const active = activeWindow === MCP_WINDOWS.DETAILS && i === detailMenuIndex;
+          return (
+            <Text key={item.action} color={active ? 'cyan' : 'gray'}>
+              {active ? '❯ ' : '  '}{i + 1}. {item.label}
+            </Text>
+          );
+        })}
+      </Box>
+    );
+  };
+
   return (
     <>
-      {/* 左侧：MCP 列表 */}
+      {/* 左侧：MCP 列表（虚拟滚动）*/}
       <Box
         width={leftWidth}
         borderStyle="single"
@@ -372,17 +395,24 @@ function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, ac
         flexDirection="column"
         paddingX={1}
       >
-        <Text bold color="cyan">MCP 列表 ({mcpList.length})</Text>
-        <Box flexDirection="column" marginTop={1} flexGrow={1} overflow="hidden">
-          {mcpList.map((name, index) => (
-            <Text key={name} color={index === selectedIndex ? 'cyan' : 'white'}>
-              {index === selectedIndex ? '► ' : '  '}{name}
-            </Text>
-          ))}
+        <Text bold color="cyan">MCP ({mcpList.length})</Text>
+        <Box flexDirection="column" marginTop={1}>
+          {scrollOffset > 0 && <Text color="gray" dimColor>↑ {scrollOffset} more</Text>}
+          {visibleList.map((name, i) => {
+            const realIdx = scrollOffset + i;
+            return (
+              <Text key={name} color={realIdx === selectedIndex ? 'cyan' : 'white'}>
+                {realIdx === selectedIndex ? '►' : ' '} {name}
+              </Text>
+            );
+          })}
+          {scrollOffset + listVisible < mcpList.length && (
+            <Text color="gray" dimColor>↓ {mcpList.length - scrollOffset - listVisible} more</Text>
+          )}
         </Box>
       </Box>
 
-      {/* 中间：详情 */}
+      {/* 中间：/mcp 风格详情 + 操作菜单 */}
       <Box
         width={middleWidth}
         borderStyle="single"
@@ -392,170 +422,96 @@ function MCPPage({ mcpServers, selectedItem, selectedIndex, cliSelectedIndex, ac
         paddingY={0}
       >
         <Text bold color="cyan">详情</Text>
-        {serverInfo ? (() => {
-          const firstCli = Object.keys(serverInfo.clis)[0];
-          const config = serverInfo.clis[firstCli]?.config || {};
-          const args = config.args || [];
-          const env = config.env || {};
-          const envEntries = Object.entries(env);
-          const cliNames = Object.keys(serverInfo.clis).map(c => CLI_NAMES[c] || c);
-          return (
-            <Box flexDirection="column" marginTop={1}>
-              <Text bold color="yellow">{selectedItem}</Text>
-
-              <Text> </Text>
-              <Text color="gray">command: <Text color="white">{config.command || 'N/A'}</Text></Text>
-
-              {args.length > 0 && (
-                <Box flexDirection="column">
-                  <Text color="gray">args:</Text>
-                  {args.map((a, i) => (
-                    <Text key={i} color="white">  {a}</Text>
-                  ))}
-                </Box>
-              )}
-
-              <Text color="gray">type: <Text color="white">{config.type || 'stdio'}</Text></Text>
-
-              {envEntries.length > 0 && (
-                <Box flexDirection="column" marginTop={1}>
-                  <Text color="gray">env:</Text>
-                  {envEntries.map(([k, v]) => (
-                    <Text key={k} color="white">  {k}=<Text color="gray">{String(v).slice(0, 30)}</Text></Text>
-                  ))}
-                </Box>
-              )}
-
-              <Text> </Text>
-              <Text color="gray">已配置在:</Text>
-              {cliNames.map(n => (
-                <Text key={n} color="green">  🟢 {n}</Text>
-              ))}
-              {availableCLIs.filter(c => !serverInfo.clis[c]).map(c => (
-                <Text key={c} color="gray">  ⚪ {CLI_NAMES[c]}</Text>
-              ))}
-            </Box>
-          );
-        })() : (
-          <Text color="gray" dimColor>选择一个 MCP 查看详情</Text>
-        )}
+        <Box flexDirection="column" marginTop={1}>
+          {renderDetails()}
+        </Box>
       </Box>
 
-      {/* 右侧：上配置，下CLI */}
-      <Box width={rightWidth} flexDirection="column">
-        {/* 上：配置参数（60%）*/}
-        <Box
-          flexGrow={3}
-          borderStyle="single"
-          borderColor={activeWindow === MCP_WINDOWS.RIGHT && rightPanel === RIGHT_PANEL.CONFIG ? 'green' : 'gray'}
-          flexDirection="column"
-          paddingX={1}
-        >
-          <Text bold color="cyan">配置参数</Text>
-          {serverInfo && (() => {
-            const config = serverInfo.clis[Object.keys(serverInfo.clis)[0]]?.config || {};
-            const rows = [];
-            for (const [key, value] of Object.entries(config)) {
-              if (Array.isArray(value)) {
-                rows.push(<Text key={key} color="gray">{key}:</Text>);
-                value.forEach((v, i) => rows.push(
-                  <Text key={`${key}-${i}`} color="white">  {String(v)}</Text>
-                ));
-              } else if (value !== null && typeof value === 'object') {
-                rows.push(<Text key={key} color="gray">{key}:</Text>);
-                Object.entries(value).forEach(([k, v]) => rows.push(
-                  <Text key={`${key}-${k}`} color="white">  {k}: <Text color="gray">{String(v).slice(0, 25)}</Text></Text>
-                ));
-              } else {
-                rows.push(
-                  <Text key={key} color="gray">{key}: <Text color="white">{String(value)}</Text></Text>
-                );
-              }
-            }
-            return <Box flexDirection="column" marginTop={1} overflow="hidden">{rows}</Box>;
-          })()}
-        </Box>
-
-        {/* 下：CLI 状态（40%）*/}
-        <Box
-          flexGrow={2}
-          borderStyle="single"
-          borderColor={activeWindow === MCP_WINDOWS.RIGHT && rightPanel === RIGHT_PANEL.CLI ? 'green' : 'gray'}
-          flexDirection="column"
-          paddingX={1}
-        >
-          <Text bold color="cyan">CLI 状态</Text>
-          {serverInfo && (
-            <Box flexDirection="column" marginTop={1}>
-              {availableCLIs.map((cli, index) => {
-                const hasCli = serverInfo.clis[cli];
-                const isSelected = activeWindow === MCP_WINDOWS.RIGHT && rightPanel === RIGHT_PANEL.CLI && index === cliSelectedIndex;
-                
-                return (
-                  <Text key={cli}>
-                    {isSelected ? '► ' : '  '}
-                    {hasCli ? '🟢' : '⚪'} {CLI_NAMES[cli]}
+      {/* 右侧：CLI 分配 */}
+      <Box
+        width={rightWidth}
+        borderStyle="single"
+        borderColor={activeWindow === MCP_WINDOWS.CLI ? 'green' : 'gray'}
+        flexDirection="column"
+        paddingX={1}
+      >
+        <Text bold color="cyan">CLI 分配</Text>
+        {serverInfo ? (
+          <Box flexDirection="column" marginTop={1}>
+            {availableCLIs.map((cli, index) => {
+              const hasCli = !!serverInfo.clis[cli];
+              const isSelected = activeWindow === MCP_WINDOWS.CLI && index === cliSelectedIndex;
+              return (
+                <Box key={cli} flexDirection="column" marginBottom={1}>
+                  <Text color={isSelected ? 'cyan' : 'white'}>
+                    {isSelected ? '►' : ' '} {hasCli ? '🟢' : '⚪'} {CLI_NAMES[cli]}
                   </Text>
-                );
-              })}
-              {activeWindow === MCP_WINDOWS.RIGHT && rightPanel === RIGHT_PANEL.CLI && (
-                <Box marginTop={1}>
-                  <Text color="yellow" dimColor>[Enter] 切换</Text>
+                  {isSelected && (
+                    <Text color="yellow" dimColor>  [Enter] {hasCli ? '移除' : '添加'}</Text>
+                  )}
                 </Box>
-              )}
-            </Box>
-          )}
-        </Box>
+              );
+            })}
+          </Box>
+        ) : (
+          <Text color="gray" dimColor marginTop={1}>选择 MCP</Text>
+        )}
       </Box>
     </>
   );
 }
 
 // Skills 页面
-function SkillsPage({ skills, selectedItem, selectedIndex, terminalWidth }) {
+function SkillsPage({ skills, selectedItem, selectedIndex, terminalWidth, terminalHeight }) {
   const skillsList = Object.keys(skills).sort();
   const skill = selectedItem ? skills[selectedItem] : null;
-  
   const leftWidth = Math.floor(terminalWidth * 0.4);
-  
+
+  const listVisible = Math.max(3, terminalHeight - 12);
+  const scrollOffset = Math.max(0, Math.min(
+    selectedIndex - Math.floor(listVisible / 2),
+    Math.max(0, skillsList.length - listVisible)
+  ));
+  const visibleList = skillsList.slice(scrollOffset, scrollOffset + listVisible);
+
   return (
     <>
       <Box width={leftWidth} borderStyle="single" borderColor="green" flexDirection="column" paddingX={1}>
-        <Text bold color="cyan">Skills 列表 ({skillsList.length})</Text>
+        <Text bold color="cyan">Skills ({skillsList.length})</Text>
         <Box flexDirection="column" marginTop={1}>
-          {skillsList.map((key, index) => {
+          {scrollOffset > 0 && <Text color="gray" dimColor>↑ {scrollOffset} more</Text>}
+          {visibleList.map((key, i) => {
+            const realIdx = scrollOffset + i;
             const s = skills[key];
             return (
-              <Text key={key} color={index === selectedIndex ? 'cyan' : 'white'}>
-                {index === selectedIndex ? '► ' : '  '}{s.disabled ? '⚪' : '🟢'} {s.name}
+              <Text key={key} color={realIdx === selectedIndex ? 'cyan' : 'white'}>
+                {realIdx === selectedIndex ? '►' : ' '} {s.disabled ? '⚪' : '🟢'} {s.name}
               </Text>
             );
           })}
+          {scrollOffset + listVisible < skillsList.length && (
+            <Text color="gray" dimColor>↓ {skillsList.length - scrollOffset - listVisible} more</Text>
+          )}
         </Box>
       </Box>
 
       <Box flexGrow={1} borderStyle="single" borderColor="gray" flexDirection="column" paddingX={1}>
         <Text bold color="cyan">详情</Text>
-        {skill && (
+        {skill ? (
           <Box flexDirection="column" marginTop={1}>
-            <Text bold color="yellow">名称</Text>
-            <Text color="white">{skill.name}</Text>
-            
-            <Box marginTop={1}>
-              <Text bold color="yellow">版本</Text>
-            </Box>
-            <Text color="gray">{skill.version}</Text>
-            
-            <Box marginTop={1}>
-              <Text bold color="yellow">市场</Text>
-            </Box>
-            <Text color="gray">{skill.marketplace}</Text>
-            
-            <Box marginTop={1}>
-              <Text bold color="yellow">状态</Text>
-            </Box>
-            <Text color={skill.disabled ? 'red' : 'green'}>{skill.disabled ? '已禁用' : '已启用'}</Text>
+            <Text bold color="white">{skill.name}</Text>
+            <Text> </Text>
+            <Text>{'Status: '}<Text color={skill.disabled ? 'red' : 'green'}>{skill.disabled ? '✖ disabled' : '✔ enabled'}</Text></Text>
+            <Text>{'Version: '}<Text color="white">{skill.version}</Text></Text>
+            <Text>{'Marketplace: '}<Text color="white">{skill.marketplace}</Text></Text>
+            {skill.installedAt && (
+              <Text>{'Installed: '}<Text color="gray">{new Date(skill.installedAt).toLocaleDateString()}</Text></Text>
+            )}
+            <Text> </Text>
+            <Text color="yellow">❯ 1. {skill.disabled ? 'Enable' : 'Disable'}</Text>
           </Box>
+        ) : (
+          <Text color="gray" dimColor marginTop={1}>← 选择一个 Skill</Text>
         )}
       </Box>
     </>
@@ -563,46 +519,51 @@ function SkillsPage({ skills, selectedItem, selectedIndex, terminalWidth }) {
 }
 
 // 回收站页面
-function TrashPage({ trash, selectedItem, selectedIndex, terminalWidth }) {
+function TrashPage({ trash, selectedItem, selectedIndex, terminalWidth, terminalHeight }) {
   const trashList = Object.keys(trash).sort();
   const item = selectedItem ? trash[selectedItem] : null;
-  
   const leftWidth = Math.floor(terminalWidth * 0.4);
-  
+
+  const listVisible = Math.max(3, terminalHeight - 12);
+  const scrollOffset = Math.max(0, Math.min(
+    selectedIndex - Math.floor(listVisible / 2),
+    Math.max(0, trashList.length - listVisible)
+  ));
+  const visibleList = trashList.slice(scrollOffset, scrollOffset + listVisible);
+
   return (
     <>
       <Box width={leftWidth} borderStyle="single" borderColor="green" flexDirection="column" paddingX={1}>
         <Text bold color="cyan">回收站 ({trashList.length})</Text>
         <Box flexDirection="column" marginTop={1}>
-          {trashList.map((name, index) => (
-            <Text key={name} color={index === selectedIndex ? 'cyan' : 'white'}>
-              {index === selectedIndex ? '► ' : '  '}🗑️  {name}
-            </Text>
-          ))}
+          {scrollOffset > 0 && <Text color="gray" dimColor>↑ {scrollOffset} more</Text>}
+          {visibleList.map((name, i) => {
+            const realIdx = scrollOffset + i;
+            return (
+              <Text key={name} color={realIdx === selectedIndex ? 'cyan' : 'white'}>
+                {realIdx === selectedIndex ? '►' : ' '} 🗑️  {name}
+              </Text>
+            );
+          })}
+          {scrollOffset + listVisible < trashList.length && (
+            <Text color="gray" dimColor>↓ {trashList.length - scrollOffset - listVisible} more</Text>
+          )}
         </Box>
       </Box>
 
       <Box flexGrow={1} borderStyle="single" borderColor="gray" flexDirection="column" paddingX={1}>
         <Text bold color="cyan">详情</Text>
-        {item && (
+        {item ? (
           <Box flexDirection="column" marginTop={1}>
-            <Text bold color="yellow">名称</Text>
-            <Text color="white">{selectedItem}</Text>
-            
-            <Box marginTop={1}>
-              <Text bold color="yellow">删除时间</Text>
-            </Box>
-            <Text color="gray">{new Date(item.deletedAt).toLocaleString()}</Text>
-            
-            <Box marginTop={1}>
-              <Text bold color="yellow">来自 CLI</Text>
-            </Box>
-            <Text color="gray">{item.fromCLIs.map(c => CLI_NAMES[c]).join(', ')}</Text>
-            
-            <Box marginTop={2}>
-              <Text color="green">[Enter] 恢复到原 CLI</Text>
-            </Box>
+            <Text bold color="white">{selectedItem} MCP Server</Text>
+            <Text> </Text>
+            <Text>{'Deleted: '}<Text color="gray">{new Date(item.deletedAt).toLocaleString()}</Text></Text>
+            <Text>{'From CLI: '}<Text color="white">{item.fromCLIs.map(c => CLI_NAMES[c] || c).join(', ')}</Text></Text>
+            <Text> </Text>
+            <Text color="yellow">❯ 1. Restore</Text>
           </Box>
+        ) : (
+          <Text color="gray" dimColor marginTop={1}>← 选择一个条目</Text>
         )}
       </Box>
     </>
