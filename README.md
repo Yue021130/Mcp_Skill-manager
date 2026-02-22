@@ -1,5 +1,7 @@
 # MCP Skills Manager
 
+> 项目开发中....
+
 一个基于 React + Ink 的终端 CLI 工具，用于管理 Claude Code 的 MCP 服务器和 Skills。
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
